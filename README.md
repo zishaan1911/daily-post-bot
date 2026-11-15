@@ -45,6 +45,7 @@ Repo → Settings → Secrets and variables → Actions:
   - `GH_USERNAME`: defaults to the repo owner
   - `AUTHOR_BIO`: e.g. `a full-stack dev building AI tools in public`. This shapes the voice a lot.
   - `NEWS_PROBABILITY`: `0.3` by default
+  - `MEME_PROBABILITY`: `0.5` by default. Chance of adding a meme image to the day's posts
   - `GROQ_MODEL`: leave blank and the bot picks the best model Groq currently offers (Groq retires models over time). Set it to force a specific one from https://console.groq.com/docs/models
   - `INCLUDE_PRIVATE_REPOS`: `false` by default
   - `X_MODE`: `api` (auto, paid, about $0.45 a month) or `manual` (free one-tap link). With `manual` you don't need any X keys.
@@ -59,6 +60,16 @@ Actions tab → **Daily post** → *Run workflow*. Tick "Force a tech-news angle
 
 ### 5. Schedule
 It runs daily at **09:00 IST (03:30 UTC)**. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time. GitHub can run scheduled jobs a few minutes late.
+
+## Memes
+
+About half the days, the bot also makes a meme about the post. It picks one of ~25 classic templates (drake, this is fine, gru's plan, galaxy brain…) and the image is generated for free by [memegen.link](https://memegen.link), no key needed.
+
+- **manual mode:** the meme shows at the top of the daily issue. Save it and attach it when you post (the one-tap links can't attach images).
+- **`X_MODE=api`:** the meme is uploaded with the post automatically. If the upload fails, it posts the text alone.
+- **`LINKEDIN_MODE=api`:** text only for now.
+
+Force one with *Run workflow → Force a meme*, or `python bot.py --meme`.
 
 ## Running locally
 

@@ -41,6 +41,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL") or ""  # blank = pick the best available model automatically
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS") or 24)
 NEWS_PROBABILITY = float(os.getenv("NEWS_PROBABILITY") or 0.3)  # chance to weave in tech news
+MEME_PROBABILITY = float(os.getenv("MEME_PROBABILITY") or 0.5)  # chance to add a meme image
 INCLUDE_PRIVATE_REPOS = os.getenv("INCLUDE_PRIVATE_REPOS", "false").lower() == "true"
 AUTHOR_BIO = os.getenv("AUTHOR_BIO") or "a software developer who builds things in public"
 # Auto-posting is ON by default. A platform is skipped (with a warning) if its keys aren't set.
@@ -271,22 +272,86 @@ Their voice guide and writing samples:
 {style}
 -----
 
-Hard rules:
+How to write a good post:
+- tell ONE story. what is the thing, what did i do to it, what's funny or hard about it.
+  never walk through commits one by one. 20 commits = "spent the day doing X", not a list
+- if people may not know the project, say what it is in one plain line early on
+  (e.g. "it's a gpu i designed from scratch that draws triangles on a $10 fpga")
+- funny. dry, deadpan, self-aware, short punchlines, like the best tech twitter posts:
+  understatement, absurd comparisons, roasting my own code or decisions. be bold, not cringe
+- no "thrilled to share", no inspirational lessons, no "here's what i learned"
+
+Hard rules (facts):
 - first person. every fact about a project must come from the context given (description,
-  readme, commits). never invent features, numbers, results, or hardware/tech it uses
+  readme, commits). never invent features, numbers, results, time saved, or tech it uses.
+  jokes and exaggeration are fine as long as they're obviously jokes, not fake facts
 - repos listed under "my repos" are the author's OWN projects. talk about them as things they
   built ("i built", "i'm working on"), never as something they found or starred
 - only say they did something today if a commit, pr, or release shows it
-- turn commit messages into a human story (what changed and why it matters). don't paste them
 - don't mention repo names that aren't in the context
 - the x post must NOT contain any links or urls (links cost extra on x). linkedin may have one link
 
 Return ONLY valid JSON with exactly these keys:
 {{
-  "linkedin": "linkedin post, 400-1000 characters, short lines with blank lines between, first line makes people want to read on, ends with a thought or question, 2-4 hashtags at the end",
-  "x": "x post, MUST be under 260 characters, no links, 0-1 hashtags",
+  "x": "x post. under 200 characters is ideal, MUST be under 260. one punchy thought or joke, no links, 0-1 hashtags",
+  "linkedin": "linkedin post, 400-900 characters. hook line, what the project is, the story of today, a funny line, end with a thought or question. short lines with blank lines between. 2-4 hashtags at the end",
+  "meme": {meme_spec},
   "topic": "3-8 word summary of what this post is about"
 }}"""
+
+MEME_TEMPLATES = {
+    "drake": "Drakeposting: line1 = thing rejected, line2 = thing preferred",
+    "db": "Distracted Boyfriend: line1 = new shiny thing, line2 = me, line3 = what i should be doing",
+    "fine": "This is Fine (dog in burning room): line1 = situation, line2 = 'this is fine' style reaction",
+    "gru": "Gru's Plan: 4 lines, step 1, step 2, step 3 (goes wrong), step 4 (same as 3, realization)",
+    "pigeon": "Is This a Pigeon: line1 = me, line2 = the thing, line3 = 'is this X?' misidentification",
+    "astronaut": "Always Has Been: line1/2 = 'wait it's all X?', line3/4 = 'always has been'",
+    "spongebob": "Mocking Spongebob: line1 = normal statement, line2 = mocking version",
+    "buzz": "X, X Everywhere: line1 = 'X', line2 = 'X everywhere'",
+    "rollsafe": "Roll Safe (tapping head): line1 = setup, line2 = galaxy-brained 'smart' solution",
+    "harold": "Hide the Pain Harold: line1 = setup, line2 = smiling through pain",
+    "both": "Why Not Both: line1 = choice question, line2 = 'why not both?'",
+    "stonks": "Stonks: line1 = dumb decision, line2 = 'stonks'",
+    "pooh": "Tuxedo Pooh: line1 = normal way to say it, line2 = fancy way",
+    "ds": "Daily Struggle (two buttons, sweating): line1 = button 1, line2 = button 2, line3 = me",
+    "gb": "Galaxy Brain: 4 lines, increasingly 'enlightened' (absurd) ideas",
+    "mordor": "One Does Not Simply: line1 = 'one does not simply', line2 = the hard thing",
+    "success": "Success Kid: line1 = setup, line2 = small win",
+    "fry": "Futurama Fry (squinting): line1 = 'not sure if X', line2 = 'or just Y'",
+    "same": "They're the Same Picture: line1 = thing A, line2 = thing B, line3 = 'they're the same picture'",
+    "exit": "Left Exit 12: line1 = sensible road, line2 = chaotic exit, line3 = me swerving",
+    "handshake": "Epic Handshake: line1 = group A, line2 = group B, line3 = what they agree on",
+    "spiderman": "Spider-Man Pointing: line1 = thing A, line2 = thing B (they're the same)",
+    "woman-cat": "Woman Yelling at Cat: line1 = angry accusation, line2 = smug cat reply",
+    "bihw": "But It's Honest Work: line1 = tiny achievement, line2 = 'but it's honest work'",
+    "wonka": "Condescending Wonka: line1 = 'oh you X?', line2 = 'tell me more about Y'",
+    "millers": "You Guys Are Getting Paid?: 4 lines, setup between two characters, last = shocked question",
+}
+
+MEME_SPEC_ON = (
+    '{"template": "<one id from the list>", "lines": ["...", "..."]}. '
+    "make a meme about today's post. it has to be actually funny to developers and match the "
+    "template's format. lines are short (max ~8 words each), lowercase is fine. templates:\n"
+    + "\n".join(f"    {k}: {v}" for k, v in MEME_TEMPLATES.items())
+)
+MEME_SPEC_OFF = "null (no meme today)"
+
+
+def meme_url(meme: dict | None) -> str | None:
+    """free meme images from memegen.link (no key needed)."""
+    if not meme or meme.get("template") not in MEME_TEMPLATES or not meme.get("lines"):
+        return None
+
+    def enc(s: str) -> str:
+        s = str(s).strip() or " "
+        for a, b in [("_", "__"), ("-", "--"), (" ", "_"), ("?", "~q"), ("%", "~p"), ("#", "~h"),
+                     ("/", "~s"), ("\\", "~b"), ("&", "~a"), ('"', "''"), ("\n", "~n")]:
+            s = s.replace(a, b)
+        return requests.utils.quote(s, safe="_~'")
+
+    return f"https://api.memegen.link/images/{meme['template']}/" + "/".join(
+        enc(l) for l in meme["lines"][:8]
+    ) + ".png"
 
 
 def load_style() -> str:
@@ -400,12 +465,19 @@ def parse_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
-def call_groq(model: str, user_prompt: str, json_mode: bool = True) -> dict:
+def call_groq(model: str, user_prompt: str, json_mode: bool = True, with_meme: bool = False) -> dict:
     body = {
         "model": model,
-        "temperature": 0.8,
+        "temperature": 0.9,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT.format(bio=AUTHOR_BIO, style=load_style())},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(
+                    bio=AUTHOR_BIO,
+                    style=load_style(),
+                    meme_spec=MEME_SPEC_ON if with_meme else MEME_SPEC_OFF,
+                ),
+            },
             {"role": "user", "content": user_prompt},
         ],
     }
@@ -425,14 +497,14 @@ def call_groq(model: str, user_prompt: str, json_mode: bool = True) -> dict:
     return data
 
 
-def generate_posts(user_prompt: str) -> dict:
+def generate_posts(user_prompt: str, with_meme: bool = False) -> dict:
     if not GROQ_API_KEY:
         sys.exit("GROQ_API_KEY is not set")
     data, errors = None, []
     for model in pick_models()[:5]:
         for json_mode in (True, False):  # some models don't support json mode
             try:
-                data = call_groq(model, user_prompt, json_mode)
+                data = call_groq(model, user_prompt, json_mode, with_meme)
                 print(f"model: {model}")
                 break
             except Exception as e:
@@ -445,6 +517,7 @@ def generate_posts(user_prompt: str) -> dict:
         data["linkedin"] = lowercase_voice(data["linkedin"])
         data["x"] = lowercase_voice(data["x"])
     data["x"] = fit_x(strip_links(data["x"]))
+    data["meme_url"] = meme_url(data.get("meme")) if with_meme else None
     return data
 
 
@@ -460,16 +533,30 @@ def fit_x(text: str) -> str:
 
 
 # ---------- publishing (optional) ----------
-def post_to_x(text: str) -> str:
+def post_to_x(text: str, image_url: str | None = None) -> str:
+    import tempfile
+
     import tweepy
 
-    client = tweepy.Client(
+    keys = dict(
         consumer_key=os.environ["X_API_KEY"],
         consumer_secret=os.environ["X_API_SECRET"],
         access_token=os.environ["X_ACCESS_TOKEN"],
         access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
     )
-    resp = client.create_tweet(text=text)
+    client = tweepy.Client(**keys)
+    media_ids = None
+    if image_url:
+        try:
+            img = requests.get(image_url, timeout=60)
+            img.raise_for_status()
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(img.content)
+            api = tweepy.API(tweepy.OAuth1UserHandler(*keys.values()))
+            media_ids = [api.media_upload(f.name).media_id]
+        except Exception as e:  # meme is a bonus; still post the text
+            print(f"warning: meme upload failed, posting text only: {e}", file=sys.stderr)
+    resp = client.create_tweet(text=text, media_ids=media_ids)
     return f"https://x.com/i/web/status/{resp.data['id']}"
 
 
@@ -491,12 +578,19 @@ def linkedin_manual_section(text: str) -> str:
     )
 
 
-def open_manual_issue(sections: list[str], platforms: list[str]) -> str:
+def open_manual_issue(sections: list[str], platforms: list[str], image_url: str | None = None) -> str:
     """free mode: one github issue a day with one-tap links for each platform."""
     repo = os.environ["GITHUB_REPOSITORY"]  # set automatically in github actions
     token = os.environ["ISSUE_TOKEN"]
+    meme = (
+        f"## today's meme\n\n![meme]({image_url})\n\n"
+        "long-press (or right-click) to save it, then attach it when you post.\n\n---\n\n"
+        if image_url
+        else ""
+    )
     body = (
         "each link opens the app with the post filled in, you just hit post.\n\n"
+        + meme
         + "\n\n---\n\n".join(sections)
         + "\n\n_close this issue once posted_"
     )
@@ -557,6 +651,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print only; don't save or post")
     ap.add_argument("--news", action="store_true", help="force a tech-news angle today")
+    ap.add_argument("--meme", action="store_true", help="force a meme today")
     args = ap.parse_args()
 
     activity = fetch_github_activity()
@@ -569,7 +664,8 @@ def main() -> None:
         f"repos: {[r['name'] for r in activity['repos']]} | real work: {real} | "
         f"events: {len(activity['events'])} | news angle: {bool(news)}"
     )
-    posts = generate_posts(build_user_prompt(activity, news, history))
+    with_meme = args.meme or random.random() < MEME_PROBABILITY
+    posts = generate_posts(build_user_prompt(activity, news, history), with_meme)
 
     today = dt.date.today().isoformat()
     md = (
@@ -577,6 +673,8 @@ def main() -> None:
         f"## LinkedIn\n\n{posts['linkedin']}\n\n"
         f"## X ({len(posts['x'])}/{X_LIMIT})\n\n{posts['x']}\n"
     )
+    if posts.get("meme_url"):
+        md += f"\n## Meme\n\n![meme]({posts['meme_url']})\n"
     print("\n" + md)
     if args.dry_run:
         return
@@ -594,7 +692,7 @@ def main() -> None:
         manual_platforms.append("x")
     elif AUTO_POST_X and X_MODE == "api" and has_keys(X_KEYS):
         try:
-            print("X:", post_to_x(posts["x"]))
+            print("X:", post_to_x(posts["x"], posts.get("meme_url")))
         except Exception as e:
             failures += 1
             print(f"X post failed: {e}", file=sys.stderr)
@@ -611,7 +709,7 @@ def main() -> None:
 
     if manual_sections and has_keys(ISSUE_KEYS):
         try:
-            print("One-tap links:", open_manual_issue(manual_sections, manual_platforms))
+            print("One-tap links:", open_manual_issue(manual_sections, manual_platforms, posts.get("meme_url")))
         except Exception as e:
             failures += 1
             print(f"Could not open the one-tap issue: {e}", file=sys.stderr)
