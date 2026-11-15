@@ -406,7 +406,13 @@ def open_manual_issue(sections: list[str], platforms: list[str]) -> str:
     r = requests.post(
         f"https://api.github.com/repos/{repo}/issues",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        json={"title": f"post on {' + '.join(platforms)}: {dt.date.today():%b %d}", "body": body},
+        json={
+            "title": f"post on {' + '.join(platforms)}: {dt.date.today():%b %d}",
+            "body": body,
+            # assigning the repo owner makes github always send a notification
+            # (email + mobile push), even if they aren't watching the repo
+            "assignees": [os.getenv("GITHUB_REPOSITORY_OWNER") or repo.split("/")[0]],
+        },
         timeout=30,
     )
     r.raise_for_status()
