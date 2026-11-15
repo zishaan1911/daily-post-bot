@@ -13,5 +13,10 @@
     "date": "2026-11-15",
     "topic": "tiny gpu board routing progress",
     "x": "added board routing, drc pass, and cinematic renders to tiny‑gpu. maze router saved me hours. still not built though. anyone tried a similar fpga gpu? #fpga"
+  },
+  {
+    "date": "2026-11-15",
+    "topic": "tiny gpu board routing progress",
+    "x": "spent the day finally autorouting the tiny gpu board. i guess the router finally learned to love mazes #pcb"
   }
 ]
