@@ -8,5 +8,10 @@
     "date": "2026-11-15",
     "topic": "nvidia gpu pricing and tiny-gpu",
     "x": "nvidia's financing tricks keep gpu prices high again. makes me appreciate tiny-gpu even more—running on cheap hardware feels like a win. #gpu"
+  },
+  {
+    "date": "2026-11-15",
+    "topic": "tiny gpu board routing progress",
+    "x": "added board routing, drc pass, and cinematic renders to tiny‑gpu. maze router saved me hours. still not built though. anyone tried a similar fpga gpu? #fpga"
   }
 ]
