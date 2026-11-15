@@ -222,12 +222,25 @@ def strip_links(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+def split_activity(activity: list[str]) -> tuple[list[str], list[str]]:
+    """real work (commits, prs, releases...) vs. stars/forks, which aren't worth a post alone."""
+    minor = [a for a in activity if a.startswith(("Starred ", "Forked "))]
+    return [a for a in activity if a not in minor], minor
+
+
 def build_user_prompt(activity: list[str], news: list[str], history: list[dict]) -> str:
     parts = [f"Today is {dt.date.today():%A, %B %d, %Y}."]
-    if activity:
-        parts.append("My GitHub activity in the last day:\n- " + "\n- ".join(activity[:25]))
+    real, minor = split_activity(activity)
+    if real:
+        parts.append("My GitHub activity in the last day:\n- " + "\n- ".join(real[:25]))
     else:
-        parts.append("I had no public GitHub activity in the last day.")
+        parts.append("I didn't ship anything on GitHub in the last day, so make today's post about the news.")
+    if minor:
+        parts.append(
+            "Repos I starred/forked (mention one only if it connects naturally to the post. you know "
+            "nothing about them beyond the name, so don't describe what they do):\n- "
+            + "\n- ".join(minor[:10])
+        )
     if news:
         parts.append(
             "Trending tech news (pick at most ONE that genuinely relates to my work or that a "
@@ -237,7 +250,7 @@ def build_user_prompt(activity: list[str], news: list[str], history: list[dict])
     if history:
         recent = "\n- ".join(h["topic"] for h in history[-10:])
         parts.append(f"Recent post topics (do NOT repeat these angles or openings):\n- {recent}")
-    if not activity and not news:
+    if not real and not news:
         parts.append("Write a reflective post about a lesson from building software recently.")
     return "\n\n".join(parts)
 
@@ -444,7 +457,8 @@ def main() -> None:
     args = ap.parse_args()
 
     activity = fetch_github_activity()
-    use_news = args.news or not activity or random.random() < NEWS_PROBABILITY
+    real, _ = split_activity(activity)
+    use_news = args.news or not real or random.random() < NEWS_PROBABILITY
     news = fetch_tech_news() if use_news else []
     history = load_history()
 
