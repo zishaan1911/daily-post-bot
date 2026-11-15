@@ -46,9 +46,13 @@ AUTHOR_BIO = os.getenv("AUTHOR_BIO") or "a software developer who builds things 
 # Auto-posting is ON by default. A platform is skipped (with a warning) if its keys aren't set.
 AUTO_POST_X = (os.getenv("AUTO_POST_X") or "true").lower() == "true"
 AUTO_POST_LINKEDIN = (os.getenv("AUTO_POST_LINKEDIN") or "true").lower() == "true"
-# X_MODE: "api" posts via the X API (~$0.015/post). "manual" is free: opens a GitHub
-# issue with a one-tap link that pre-fills the post on X, and you just hit post.
+# X_MODE / LINKEDIN_MODE:
+#   "api"    posts automatically through the platform's API (x costs ~$0.015/post)
+#   "manual" is free and needs no platform keys: opens one GitHub issue a day with
+#            one-tap links that pre-fill each post, and you just hit post.
 X_MODE = (os.getenv("X_MODE") or "api").lower()
+LINKEDIN_MODE = (os.getenv("LINKEDIN_MODE") or "api").lower()
+ISSUE_KEYS = ["GITHUB_REPOSITORY", "ISSUE_TOKEN"]
 LOWERCASE = (os.getenv("LOWERCASE") or "true").lower() == "true"
 X_KEYS = ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"]
 LINKEDIN_KEYS = ["LINKEDIN_ACCESS_TOKEN"]
@@ -291,22 +295,37 @@ def post_to_x(text: str) -> str:
     return f"https://x.com/i/web/status/{resp.data['id']}"
 
 
-def post_to_x_manual(text: str) -> str:
-    """free mode: open a github issue with a one-tap 'post on x' link."""
+def x_manual_section(text: str) -> str:
     from urllib.parse import quote
 
+    link = f"https://x.com/intent/post?text={quote(text)}"
+    return f"## x\n\n**[tap here to post on x]({link})**\n\n{text}"
+
+
+def linkedin_manual_section(text: str) -> str:
+    from urllib.parse import quote
+
+    link = f"https://www.linkedin.com/feed/?shareActive=true&text={quote(text)}"
+    return (
+        f"## linkedin\n\n**[tap here to post on linkedin]({link})**\n\n"
+        "if the app opens without the text filled in, copy it from here:\n\n"
+        f"```\n{text}\n```"
+    )
+
+
+def open_manual_issue(sections: list[str], platforms: list[str]) -> str:
+    """free mode: one github issue a day with one-tap links for each platform."""
     repo = os.environ["GITHUB_REPOSITORY"]  # set automatically in github actions
     token = os.environ["ISSUE_TOKEN"]
-    intent = f"https://x.com/intent/post?text={quote(text)}"
     body = (
-        f"**[tap here to post on x]({intent})**\n\n"
-        "it opens x with the post filled in, you just hit post.\n\n"
-        f"---\n\n{text}\n\n_close this issue once posted_"
+        "each link opens the app with the post filled in, you just hit post.\n\n"
+        + "\n\n---\n\n".join(sections)
+        + "\n\n_close this issue once posted_"
     )
     r = requests.post(
         f"https://api.github.com/repos/{repo}/issues",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        json={"title": f"post on x: {dt.date.today():%b %d}", "body": body},
+        json={"title": f"post on {' + '.join(platforms)}: {dt.date.today():%b %d}", "body": body},
         timeout=30,
     )
     r.raise_for_status()
@@ -380,24 +399,35 @@ def main() -> None:
     save_history(history)
 
     failures = 0
-    if AUTO_POST_X and X_MODE == "manual" and has_keys(["GITHUB_REPOSITORY", "ISSUE_TOKEN"]):
-        try:
-            print("X (one-tap link):", post_to_x_manual(posts["x"]))
-        except Exception as e:
-            failures += 1
-            print(f"X issue failed: {e}", file=sys.stderr)
+    manual_sections, manual_platforms = [], []
+
+    if AUTO_POST_X and X_MODE == "manual":
+        manual_sections.append(x_manual_section(posts["x"]))
+        manual_platforms.append("x")
     elif AUTO_POST_X and X_MODE == "api" and has_keys(X_KEYS):
         try:
             print("X:", post_to_x(posts["x"]))
         except Exception as e:
             failures += 1
             print(f"X post failed: {e}", file=sys.stderr)
-    if AUTO_POST_LINKEDIN and has_keys(LINKEDIN_KEYS):
+
+    if AUTO_POST_LINKEDIN and LINKEDIN_MODE == "manual":
+        manual_sections.append(linkedin_manual_section(posts["linkedin"]))
+        manual_platforms.append("linkedin")
+    elif AUTO_POST_LINKEDIN and LINKEDIN_MODE == "api" and has_keys(LINKEDIN_KEYS):
         try:
             print("LinkedIn:", post_to_linkedin(posts["linkedin"]))
         except Exception as e:
             failures += 1
             print(f"LinkedIn post failed: {e}", file=sys.stderr)
+
+    if manual_sections and has_keys(ISSUE_KEYS):
+        try:
+            print("One-tap links:", open_manual_issue(manual_sections, manual_platforms))
+        except Exception as e:
+            failures += 1
+            print(f"Could not open the one-tap issue: {e}", file=sys.stderr)
+
     if failures:
         sys.exit(1)
 

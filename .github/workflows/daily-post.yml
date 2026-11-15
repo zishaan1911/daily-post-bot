@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: write
-  issues: write   # for the free one-tap x mode
+  issues: write   # for the free one-tap mode
 
 jobs:
   post:
@@ -41,6 +41,7 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
           AUTO_POST_LINKEDIN: ${{ vars.AUTO_POST_LINKEDIN || 'true' }}
+          LINKEDIN_MODE: ${{ vars.LINKEDIN_MODE || 'api' }}   # 'manual' = free one-tap link via issue
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
         run: python bot.py ${{ github.event.inputs.news == 'true' && '--news' || '' }}
       - name: Commit drafts

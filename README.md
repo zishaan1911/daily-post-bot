@@ -15,7 +15,7 @@ It runs on GitHub Actions. You don't need a server.
 |---|---|
 | Groq, GitHub Actions, Hacker News, LinkedIn | free |
 | X with `X_MODE=api` (default) | about $0.015 per post, roughly $0.45 a month. The bot strips links from X posts because posts with links cost about $0.20. |
-| X with `X_MODE=manual` | **free.** Each morning the bot opens a GitHub issue with a "tap here to post on x" link. Tap it, X opens with the post filled in, and you hit post. Set the repo to Watch → All activity, and install the GitHub mobile app to get a phone notification. |
+| `X_MODE=manual` / `LINKEDIN_MODE=manual` | **free, and you don't need any X or LinkedIn keys.** Each morning the bot opens one GitHub issue with a "tap here to post" link for each platform. Tap it, the app opens with the post filled in, and you hit post. The LinkedIn link fills in the text on the website; if the mobile app opens it empty, copy the text from the issue. Set the repo to Watch → All activity, and install the GitHub mobile app to get a phone notification. |
 
 ## Your voice
 
@@ -48,6 +48,7 @@ Repo → Settings → Secrets and variables → Actions:
   - `GROQ_MODEL`: default `llama-3.3-70b-versatile`. See https://console.groq.com/docs/models
   - `INCLUDE_PRIVATE_REPOS`: `false` by default
   - `X_MODE`: `api` (auto, paid, about $0.45 a month) or `manual` (free one-tap link). With `manual` you don't need any X keys.
+  - `LINKEDIN_MODE`: `api` (auto, free, but the token expires every 60 days) or `manual` (one-tap link, no token needed)
   - `LOWERCASE`: `true` by default
   - `AUTO_POST_X` / `AUTO_POST_LINKEDIN`: set to `false` to pause one platform
 
