@@ -77,35 +77,79 @@ def gh_get(url: str, **params):
     return r.json()
 
 
-MAX_COMPARE_CALLS = 12
-_compare_calls = 0
+def gh_text(url: str) -> str:
+    headers = {"Accept": "application/vnd.github.raw+json", "User-Agent": "daily-post-bot"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    r = requests.get(url, headers=headers, timeout=15)
+    r.raise_for_status()
+    return r.text
 
 
-def commit_messages_for_push(repo: str, payload: dict) -> list[str]:
-    # GitHub's events feed no longer includes commit messages, so look them up
-    # with the compare API (capped, to stay fast and inside rate limits).
-    global _compare_calls
-    commits = payload.get("commits")
-    if commits:
-        return [c["message"].splitlines()[0] for c in commits]
-    before, head = payload.get("before"), payload.get("head")
-    if not (before and head) or set(before) == {"0"} or _compare_calls >= MAX_COMPARE_CALLS:
-        return []
-    _compare_calls += 1
+MAX_REPOS = 8
+README_CHARS = 1500
+BOT_REPO = os.getenv("GITHUB_REPOSITORY", "")  # this bot's own repo; its daily commits aren't news
+
+
+def clean_readme(md: str) -> str:
+    md = re.sub(r"<[^>]+>", " ", md)  # html tags
+    md = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", md)  # images / badges
+    md = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", md)  # links -> text
+    md = re.sub(r"\n{3,}", "\n\n", md)
+    return md.strip()[:README_CHARS]
+
+
+def repo_context(full_name: str, since: dt.datetime) -> dict | None:
+    """what the repo is (description, language, readme) + my commits in the window."""
     try:
-        data = gh_get(f"https://api.github.com/repos/{repo}/compare/{before}...{head}")
-        return [c["commit"]["message"].splitlines()[0] for c in data.get("commits", [])]
+        info = gh_get(f"https://api.github.com/repos/{full_name}")
     except requests.RequestException:
-        return []
+        return None
+    if info.get("private") and not INCLUDE_PRIVATE_REPOS:
+        return None
+    try:
+        commits = gh_get(
+            f"https://api.github.com/repos/{full_name}/commits",
+            since=since.isoformat(),
+            author=GITHUB_USERNAME,
+            per_page=30,
+        )
+        messages = [c["commit"]["message"].splitlines()[0] for c in commits]
+    except requests.RequestException:
+        messages = []
+    try:
+        readme = clean_readme(gh_text(f"https://api.github.com/repos/{full_name}/readme"))
+    except requests.RequestException:
+        readme = ""
+    return {
+        "name": full_name,
+        "mine": info["owner"]["login"].lower() == GITHUB_USERNAME.lower(),
+        "description": info.get("description") or "",
+        "language": info.get("language") or "",
+        "topics": info.get("topics") or [],
+        "url": info.get("html_url", ""),
+        "commits": messages,
+        "readme": readme,
+    }
 
 
-def fetch_github_activity() -> list[str]:
+def fetch_github_activity() -> dict:
+    """
+    returns {
+      "repos":  [repo_context...]   repos i worked on (or my own repos i touched), with real context
+      "events": [str...]            prs, issues, releases, new repos
+      "starred": [str...]           other people's repos i starred/forked (names only)
+    }
+    """
     if not GITHUB_USERNAME:
         sys.exit("GH_USERNAME is not set")
     since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=LOOKBACK_HOURS)
+    me = GITHUB_USERNAME.lower()
     events = gh_get(f"https://api.github.com/users/{GITHUB_USERNAME}/events", per_page=100)
 
+    touched: list[str] = []
     lines: list[str] = []
+    starred: list[str] = []
     for ev in events:
         created = dt.datetime.fromisoformat(ev["created_at"].replace("Z", "+00:00"))
         if created < since:
@@ -115,40 +159,75 @@ def fetch_github_activity() -> list[str]:
         repo = ev["repo"]["name"]
         p = ev.get("payload", {})
         t = ev["type"]
+        mine = repo.split("/")[0].lower() == me
 
-        if t == "PushEvent":
-            msgs = commit_messages_for_push(repo, p)
-            branch = p.get("ref", "").removeprefix("refs/heads/")
-            if msgs:
-                lines.append(f"Pushed {len(msgs)} commit(s) to {repo} ({branch}): " + "; ".join(msgs[:8]))
+        if repo == BOT_REPO and t != "PushEvent":
+            continue  # the bot's own daily issues
+        if t in ("WatchEvent", "ForkEvent"):
+            if mine:
+                touched.append(repo)  # starring your own repo = it's your project
             else:
-                lines.append(f"Pushed to {repo} ({branch})")
-        elif t == "PullRequestEvent":
+                starred.append(repo)
+            continue
+        touched.append(repo)
+        if t == "PullRequestEvent":
             pr = p.get("pull_request", {})
             action = "merged" if p.get("action") == "closed" and pr.get("merged") else p.get("action")
             lines.append(f"PR {action} in {repo}: {pr.get('title', '')}")
         elif t == "IssuesEvent":
             lines.append(f"Issue {p.get('action')} in {repo}: {p.get('issue', {}).get('title', '')}")
-        elif t == "CreateEvent":
-            if p.get("ref_type") == "repository":
-                desc = p.get("description") or ""
-                lines.append(f"Created new repo {repo}. {desc}".strip())
-            elif p.get("ref_type") == "tag":
-                lines.append(f"Tagged {p.get('ref')} in {repo}")
+        elif t == "CreateEvent" and p.get("ref_type") == "repository":
+            lines.append(f"Created a new repo: {repo}")
+        elif t == "CreateEvent" and p.get("ref_type") == "tag":
+            lines.append(f"Tagged {p.get('ref')} in {repo}")
         elif t == "ReleaseEvent":
             rel = p.get("release", {})
             lines.append(f"Released {rel.get('tag_name')} of {repo}: {rel.get('name') or ''}")
-        elif t == "WatchEvent":
-            lines.append(f"Starred {repo}")
-        elif t == "ForkEvent":
-            lines.append(f"Forked {repo}")
         elif t == "PullRequestReviewEvent":
             lines.append(f"Reviewed a PR in {repo}: {p.get('pull_request', {}).get('title', '')}")
         elif t == "PublicEvent":
             lines.append(f"Open-sourced {repo}")
 
-    # de-dupe, keep order
-    return list(dict.fromkeys(lines))
+    # the events feed can miss pushes, so also check my repos pushed in the window
+    try:
+        for r in gh_get(f"https://api.github.com/users/{GITHUB_USERNAME}/repos", sort="pushed", per_page=15):
+            pushed = dt.datetime.fromisoformat(r["pushed_at"].replace("Z", "+00:00"))
+            if pushed >= since:
+                touched.append(r["full_name"])
+    except requests.RequestException as e:
+        print(f"warning: could not list repos: {e}", file=sys.stderr)
+
+    repos = []
+    for name in list(dict.fromkeys(touched))[:MAX_REPOS]:
+        ctx = repo_context(name, since)
+        if not ctx:
+            continue
+        if name == BOT_REPO and not ctx["commits"]:
+            continue
+        repos.append(ctx)
+
+    allowed = {r["name"] for r in repos}
+    lines = [l for l in dict.fromkeys(lines) if any(n in l for n in allowed)]  # drops hidden/private ones
+    return {"repos": repos, "events": lines, "starred": list(dict.fromkeys(starred))}
+
+
+def has_real_work(activity: dict) -> bool:
+    return bool(activity["events"] or any(r["commits"] for r in activity["repos"]))
+
+
+def describe_repo(r: dict) -> str:
+    head = f"### {r['name']}" + (f" ({r['language']})" if r["language"] else "")
+    out = [head, f"what it is: {r['description'] or '(no description)'}"]
+    if r["topics"]:
+        out.append("topics: " + ", ".join(r["topics"]))
+    out.append(f"url: {r['url']}")
+    if r["commits"]:
+        out.append(f"my commits in the last day ({len(r['commits'])}):\n- " + "\n- ".join(r["commits"][:15]))
+    else:
+        out.append("no new commits from me in the last day")
+    if r["readme"]:
+        out.append(f"readme excerpt:\n{r['readme']}")
+    return "\n".join(out)
 
 
 # ---------- Tech news (Hacker News, no key needed) ----------
@@ -193,8 +272,13 @@ Their voice guide and writing samples:
 -----
 
 Hard rules:
-- first person. never invent work, numbers, or results that aren't in the provided activity
-- don't mention private repo names unless they appear in the activity list
+- first person. every fact about a project must come from the context given (description,
+  readme, commits). never invent features, numbers, results, or hardware/tech it uses
+- repos listed under "my repos" are the author's OWN projects. talk about them as things they
+  built ("i built", "i'm working on"), never as something they found or starred
+- only say they did something today if a commit, pr, or release shows it
+- turn commit messages into a human story (what changed and why it matters). don't paste them
+- don't mention repo names that aren't in the context
 - the x post must NOT contain any links or urls (links cost extra on x). linkedin may have one link
 
 Return ONLY valid JSON with exactly these keys:
@@ -222,24 +306,34 @@ def strip_links(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
-def split_activity(activity: list[str]) -> tuple[list[str], list[str]]:
-    """real work (commits, prs, releases...) vs. stars/forks, which aren't worth a post alone."""
-    minor = [a for a in activity if a.startswith(("Starred ", "Forked "))]
-    return [a for a in activity if a not in minor], minor
-
-
-def build_user_prompt(activity: list[str], news: list[str], history: list[dict]) -> str:
+def build_user_prompt(activity: dict, news: list[str], history: list[dict]) -> str:
     parts = [f"Today is {dt.date.today():%A, %B %d, %Y}."]
-    real, minor = split_activity(activity)
+    real = has_real_work(activity)
+    repos = activity["repos"]
     if real:
-        parts.append("My GitHub activity in the last day:\n- " + "\n- ".join(real[:25]))
+        parts.append(
+            "Today's post is about what I actually worked on. Pick the most interesting thread "
+            "(usually the repo with the most meaningful commits) instead of listing everything."
+        )
+    elif repos:
+        parts.append(
+            "No new commits today. Write a post spotlighting one of my projects below: what it is, "
+            "why I built it, or what's hard/interesting about it, using only the facts given."
+        )
     else:
         parts.append("I didn't ship anything on GitHub in the last day, so make today's post about the news.")
-    if minor:
+    if repos:
         parts.append(
-            "Repos I starred/forked (mention one only if it connects naturally to the post. you know "
-            "nothing about them beyond the name, so don't describe what they do):\n- "
-            + "\n- ".join(minor[:10])
+            "My repos (these are MY projects, I built them) with real context:\n\n"
+            + "\n\n".join(describe_repo(r) for r in repos)
+        )
+    if activity["events"]:
+        parts.append("Other GitHub activity:\n- " + "\n- ".join(activity["events"][:15]))
+    if activity["starred"]:
+        parts.append(
+            "Other people's repos I starred (names only. you know nothing else about them, so never "
+            "describe them or say I used them. skip unless it fits naturally):\n- "
+            + "\n- ".join(activity["starred"][:10])
         )
     if news:
         parts.append(
@@ -249,8 +343,11 @@ def build_user_prompt(activity: list[str], news: list[str], history: list[dict])
         )
     if history:
         recent = "\n- ".join(h["topic"] for h in history[-10:])
-        parts.append(f"Recent post topics (do NOT repeat these angles or openings):\n- {recent}")
-    if not real and not news:
+        parts.append(
+            "Recent post topics, ONLY so you don't repeat the same angle or opening. these are not "
+            f"facts, and may be wrong:\n- {recent}"
+        )
+    if not real and not repos and not news:
         parts.append("Write a reflective post about a lesson from building software recently.")
     return "\n\n".join(parts)
 
@@ -463,12 +560,15 @@ def main() -> None:
     args = ap.parse_args()
 
     activity = fetch_github_activity()
-    real, _ = split_activity(activity)
-    use_news = args.news or not real or random.random() < NEWS_PROBABILITY
+    real = has_real_work(activity)
+    use_news = args.news or not activity["repos"] or random.random() < NEWS_PROBABILITY
     news = fetch_tech_news() if use_news else []
     history = load_history()
 
-    print(f"GitHub items: {len(activity)} | news angle: {bool(news)}")
+    print(
+        f"repos: {[r['name'] for r in activity['repos']]} | real work: {real} | "
+        f"events: {len(activity['events'])} | news angle: {bool(news)}"
+    )
     posts = generate_posts(build_user_prompt(activity, news, history))
 
     today = dt.date.today().isoformat()

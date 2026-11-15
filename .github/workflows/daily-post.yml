@@ -27,7 +27,7 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GH_USERNAME: ${{ vars.GH_USERNAME || github.repository_owner }}
-          GH_TOKEN: ${{ secrets.GH_ACTIVITY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_ACTIVITY_TOKEN || secrets.GITHUB_TOKEN }}
           GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           AUTHOR_BIO: ${{ vars.AUTHOR_BIO }}
           NEWS_PROBABILITY: ${{ vars.NEWS_PROBABILITY || '0.3' }}
