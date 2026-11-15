@@ -45,7 +45,7 @@ Repo → Settings → Secrets and variables → Actions:
   - `GH_USERNAME`: defaults to the repo owner
   - `AUTHOR_BIO`: e.g. `a full-stack dev building AI tools in public`. This shapes the voice a lot.
   - `NEWS_PROBABILITY`: `0.3` by default
-  - `GROQ_MODEL`: default `llama-3.3-70b-versatile`. See https://console.groq.com/docs/models
+  - `GROQ_MODEL`: leave blank and the bot picks the best model Groq currently offers (Groq retires models over time). Set it to force a specific one from https://console.groq.com/docs/models
   - `INCLUDE_PRIVATE_REPOS`: `false` by default
   - `X_MODE`: `api` (auto, paid, about $0.45 a month) or `manual` (free one-tap link). With `manual` you don't need any X keys.
   - `LINKEDIN_MODE`: `api` (auto, free, but the token expires every 60 days) or `manual` (one-tap link, no token needed)

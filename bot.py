@@ -38,7 +38,7 @@ STYLE_FILE = ROOT / "style.md"
 GITHUB_USERNAME = os.getenv("GH_USERNAME", "")
 GITHUB_TOKEN = os.getenv("GH_TOKEN", "")  # optional, but includes private activity + higher rate limit
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
+GROQ_MODEL = os.getenv("GROQ_MODEL") or ""  # blank = pick the best available model automatically
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS") or 24)
 NEWS_PROBABILITY = float(os.getenv("NEWS_PROBABILITY") or 0.3)  # chance to weave in tech news
 INCLUDE_PRIVATE_REPOS = os.getenv("INCLUDE_PRIVATE_REPOS", "false").lower() == "true"
@@ -242,27 +242,95 @@ def build_user_prompt(activity: list[str], news: list[str], history: list[dict])
     return "\n\n".join(parts)
 
 
+GROQ_URL = "https://api.groq.com/openai/v1"
+# best first. groq retires models over time, so the bot checks what's actually
+# available and uses the first match (or any general chat model as a last resort).
+PREFERRED_MODELS = [
+    "openai/gpt-oss-120b",
+    "moonshotai/kimi-k2-instruct-0905",
+    "moonshotai/kimi-k2-instruct",
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "qwen/qwen3-32b",
+    "openai/gpt-oss-20b",
+]
+NOT_CHAT = ("whisper", "tts", "guard", "playai", "orpheus", "distil", "compound", "prompt")
+
+
+def available_models() -> list[str]:
+    r = requests.get(
+        f"{GROQ_URL}/models", headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, timeout=30
+    )
+    r.raise_for_status()
+    return [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
+
+
+def pick_models() -> list[str]:
+    """models to try, in order: your GROQ_MODEL (if set), then the best available ones."""
+    try:
+        avail = available_models()
+    except requests.RequestException as e:
+        print(f"warning: could not list groq models: {e}", file=sys.stderr)
+        avail = []
+    ordered = [m for m in PREFERRED_MODELS if m in avail]
+    ordered += [m for m in avail if m not in ordered and not any(k in m.lower() for k in NOT_CHAT)]
+    if GROQ_MODEL:
+        ordered = [GROQ_MODEL] + [m for m in ordered if m != GROQ_MODEL]
+    return ordered or PREFERRED_MODELS
+
+
+def parse_json(text: str) -> dict:
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if not match:
+            raise
+        return json.loads(match.group(0))
+
+
+def call_groq(model: str, user_prompt: str, json_mode: bool = True) -> dict:
+    body = {
+        "model": model,
+        "temperature": 0.8,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT.format(bio=AUTHOR_BIO, style=load_style())},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    r = requests.post(
+        f"{GROQ_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        json=body,
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"{r.status_code}: {r.text[:300]}")
+    data = parse_json(r.json()["choices"][0]["message"]["content"])
+    if not (data.get("linkedin") and data.get("x")):
+        raise RuntimeError("model reply was missing the linkedin or x post")
+    return data
+
+
 def generate_posts(user_prompt: str) -> dict:
     if not GROQ_API_KEY:
         sys.exit("GROQ_API_KEY is not set")
-    r = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={
-            "model": GROQ_MODEL,
-            "temperature": 0.8,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT.format(bio=AUTHOR_BIO, style=load_style())},
-                {"role": "user", "content": user_prompt},
-            ],
-        },
-        timeout=90,
-    )
-    if r.status_code != 200:
-        sys.exit(f"Groq API error {r.status_code}: {r.text}")
-    content = r.json()["choices"][0]["message"]["content"]
-    data = json.loads(content)
+    data, errors = None, []
+    for model in pick_models()[:5]:
+        for json_mode in (True, False):  # some models don't support json mode
+            try:
+                data = call_groq(model, user_prompt, json_mode)
+                print(f"model: {model}")
+                break
+            except Exception as e:
+                errors.append(f"{model} (json_mode={json_mode}): {e}")
+        if data:
+            break
+    if not data:
+        sys.exit("every groq model failed:\n" + "\n".join(errors))
     if LOWERCASE:
         data["linkedin"] = lowercase_voice(data["linkedin"])
         data["x"] = lowercase_voice(data["x"])
