@@ -2,10 +2,13 @@
 
 Every day this bot:
 
-1. Reads your GitHub activity from the last 24h (commits, PRs, releases, new repos, stars…)
-2. Sometimes (30% of days by default, and always when you had no activity) picks a trending tech story from Hacker News
-3. Asks a Groq model to write **one LinkedIn post and one X post** in your voice
-4. **Posts both automatically**, and saves a copy to `posts/YYYY-MM-DD.md` (it also keeps `history.json` so it doesn't repeat the same angle)
+1. Reads your GitHub activity from the last ~day: commits in public, private and org repos, plus PRs, releases and new repos. It also reads each project's description and README.
+2. Grabs today's top tech stories from Hacker News
+3. Asks a Groq model for **three options**, each with an X post and a LinkedIn post in your voice:
+   1. **my work**: a story about what you built
+   2. **news take**: your hot take on one of today's stories
+   3. **meme**: a meme image plus a short caption
+4. Opens one GitHub issue with all three and one-tap links (or auto-posts one in API mode), and saves a copy to `posts/YYYY-MM-DD.md`. It keeps `history.json` so it doesn't repeat itself.
 
 It runs on GitHub Actions. You don't need a server.
 
@@ -33,7 +36,7 @@ Make a new repo (private is fine) and push these files to it.
 | Key | Where to get it |
 |---|---|
 | `GROQ_API_KEY` | https://console.groq.com/keys |
-| `GH_ACTIVITY_TOKEN` (optional) | GitHub → Settings → Developer settings → Fine-grained token with read-only access. Gives private activity and higher rate limits. |
+| `GH_ACTIVITY_TOKEN` (needed for private work) | See **Private repos** below. Without it the bot only sees public repos. |
 | `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET` | https://developer.x.com → create a Project + App → under *User authentication settings* set permissions to **Read and write**, **then** generate the Access Token & Secret (tokens made before switching to write access can't post). Check X's current API pricing; posting may need paid credits. |
 | `LINKEDIN_ACCESS_TOKEN` | https://www.linkedin.com/developers/apps → create an app → *Products*: add **Share on LinkedIn** and **Sign In with LinkedIn using OpenID Connect** → *Auth* tab → OAuth 2.0 tools → generate a token with scopes `openid profile w_member_social`. **The token expires after 60 days**, so set a reminder to regenerate it. |
 
@@ -44,10 +47,12 @@ Repo → Settings → Secrets and variables → Actions:
 - **Variables** (all optional):
   - `GH_USERNAME`: defaults to the repo owner
   - `AUTHOR_BIO`: e.g. `a full-stack dev building AI tools in public`. This shapes the voice a lot.
-  - `NEWS_PROBABILITY`: `0.3` by default
-  - `MEME_PROBABILITY`: `0.5` by default. Chance of adding a meme image to the day's posts
   - `GROQ_MODEL`: leave blank and the bot picks the best model Groq currently offers (Groq retires models over time). Set it to force a specific one from https://console.groq.com/docs/models
-  - `INCLUDE_PRIVATE_REPOS`: `false` by default
+  - `INCLUDE_PRIVATE_REPOS`: `true` by default (needs `GH_ACTIVITY_TOKEN`)
+  - `EXCLUDE_KEYWORDS`: skip repos whose name or description contains any of these, e.g. `timber,ptm`
+  - `EXCLUDE_REPOS`: skip exact repos, e.g. `owner/name,owner/other`
+  - `AUTO_OPTION`: which option API modes post automatically: `work` (default), `news` or `meme`. Falls back to the first option available.
+  - `LOOKBACK_HOURS`: `26` by default, a little over a day so late-night work is never missed
   - `X_MODE`: `api` (auto, paid, about $0.45 a month) or `manual` (free one-tap link). With `manual` you don't need any X keys.
   - `LINKEDIN_MODE`: `api` (auto, free, but the token expires every 60 days) or `manual` (one-tap link, no token needed)
   - `LOWERCASE`: `true` by default
@@ -56,20 +61,27 @@ Repo → Settings → Secrets and variables → Actions:
 If a platform's keys are missing, the bot skips that platform with a warning and still posts to the other one.
 
 ### 4. Test it
-Actions tab → **Daily post** → *Run workflow*. Tick "Force a tech-news angle" to try the news mode.
+Actions tab → **Daily post** → *Run workflow*.
 
 ### 5. Schedule
 It runs daily at **08:45 Malaysia time (00:45 UTC)**. GitHub usually starts scheduled jobs 5–20 minutes late, so the issue arrives around 9:00. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time; it uses UTC.
 
+## Private repos
+
+To read private and organization repos, the bot needs a personal token saved as the `GH_ACTIVITY_TOKEN` secret. The built-in Actions token can only see public repos.
+
+- **Easiest:** GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → scope `repo`. It covers your repos and every org you're in, but it can also write, so keep it only in the secret.
+- **Read-only:** a **fine-grained** token with *Contents: read* and *Metadata: read*. These only cover one owner (you **or** one org), so org repos need a classic token.
+
+Private work is used, but the bot never names private repos, companies, clients or products in posts. It describes the kind of work only, and it never reads private READMEs. To leave a project out completely, use `EXCLUDE_KEYWORDS` or `EXCLUDE_REPOS`.
+
 ## Memes
 
-About half the days, the bot also makes a meme about the post. It picks one of ~25 classic templates (drake, this is fine, gru's plan, galaxy brain…) and the image is generated for free by [memegen.link](https://memegen.link), no key needed.
+The meme option uses one of ~25 classic templates (drake, this is fine, gru's plan, galaxy brain…). The image is generated for free by [memegen.link](https://memegen.link), no key needed.
 
-- **manual mode:** the meme shows at the top of the daily issue. Save it and attach it when you post (the one-tap links can't attach images).
-- **`X_MODE=api`:** the meme is uploaded with the post automatically. If the upload fails, it posts the text alone.
+- **manual mode:** the meme shows in its option in the issue. Save it and attach it when you post (the one-tap links can't attach images).
+- **`X_MODE=api`:** if the auto-posted option is the meme, the image is uploaded with it. If the upload fails, it posts the text alone.
 - **`LINKEDIN_MODE=api`:** text only for now.
-
-Force one with *Run workflow → Force a meme*, or `python bot.py --meme`.
 
 ## Running locally
 
@@ -85,7 +97,7 @@ cp .env.example .env
 python bot.py --dry-run
 ```
 
-`--dry-run` prints the posts without publishing or saving them, which is useful for tuning `AUTHOR_BIO` and the prompt. `python bot.py` without the flag posts for real. Add `--news` to force a tech-news angle.
+`--dry-run` prints the three options without publishing or saving them, which is useful for tuning `AUTHOR_BIO` and the prompt. `python bot.py` without the flag delivers them for real.
 
 ## Customising
 - **Voice:** `style.md`. Length and format rules are in `SYSTEM_PROMPT` in `bot.py`.

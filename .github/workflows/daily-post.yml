@@ -4,15 +4,6 @@ on:
   schedule:
     - cron: "45 0 * * *"   # 00:45 UTC = 08:45 malaysia (UTC+8). github often starts scheduled jobs 5-20 min late, so it lands around 9
   workflow_dispatch:
-    inputs:
-      news:
-        description: "Force a tech-news angle"
-        type: boolean
-        default: false
-      meme:
-        description: "Force a meme"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -34,9 +25,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_ACTIVITY_TOKEN || secrets.GITHUB_TOKEN }}
           GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           AUTHOR_BIO: ${{ vars.AUTHOR_BIO }}
-          NEWS_PROBABILITY: ${{ vars.NEWS_PROBABILITY || '0.3' }}
-          MEME_PROBABILITY: ${{ vars.MEME_PROBABILITY || '0.5' }}
-          INCLUDE_PRIVATE_REPOS: ${{ vars.INCLUDE_PRIVATE_REPOS || 'false' }}
+          LOOKBACK_HOURS: ${{ vars.LOOKBACK_HOURS || '26' }}   # a little over a day, so late-night work is never missed
+          INCLUDE_PRIVATE_REPOS: ${{ vars.INCLUDE_PRIVATE_REPOS || 'true' }}   # needs GH_ACTIVITY_TOKEN
+          EXCLUDE_KEYWORDS: ${{ vars.EXCLUDE_KEYWORDS }}   # e.g. timber,ptm
+          EXCLUDE_REPOS: ${{ vars.EXCLUDE_REPOS }}
+          AUTO_OPTION: ${{ vars.AUTO_OPTION || 'work' }}   # which option api modes auto-post
           AUTO_POST_X: ${{ vars.AUTO_POST_X || 'true' }}
           X_MODE: ${{ vars.X_MODE || 'api' }}           # 'manual' = free one-tap link via issue
           ISSUE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,7 +41,7 @@ jobs:
           AUTO_POST_LINKEDIN: ${{ vars.AUTO_POST_LINKEDIN || 'true' }}
           LINKEDIN_MODE: ${{ vars.LINKEDIN_MODE || 'api' }}   # 'manual' = free one-tap link via issue
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
-        run: python bot.py ${{ github.event.inputs.news == 'true' && '--news' || '' }} ${{ github.event.inputs.meme == 'true' && '--meme' || '' }}
+        run: python bot.py
       - name: Commit drafts
         if: always()
         run: |

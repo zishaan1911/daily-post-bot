@@ -1,11 +1,12 @@
 """
 Daily social post bot.
 
-Reads your recent GitHub activity (and sometimes tech news from Hacker News),
-asks a Groq-hosted LLM to write one LinkedIn post and one X post, publishes them
-automatically, and keeps a copy under posts/.
+Reads your recent GitHub activity and today's tech news (Hacker News), asks a
+Groq-hosted LLM for three post options (my work, a news take, a meme), and
+delivers them: one-tap links in a daily GitHub issue, or auto-posting via the APIs.
+Keeps a copy under posts/.
 
-Run:  python bot.py            # generate and publish today's posts
+Run:  python bot.py            # generate and deliver today's options
       python bot.py --dry-run  # generate and print only, never post or save
 """
 
@@ -40,9 +41,21 @@ GITHUB_TOKEN = os.getenv("GH_TOKEN", "")  # optional, but includes private activ
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL") or ""  # blank = pick the best available model automatically
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS") or 24)
-NEWS_PROBABILITY = float(os.getenv("NEWS_PROBABILITY") or 0.3)  # chance to weave in tech news
-MEME_PROBABILITY = float(os.getenv("MEME_PROBABILITY") or 0.5)  # chance to add a meme image
-INCLUDE_PRIVATE_REPOS = os.getenv("INCLUDE_PRIVATE_REPOS", "false").lower() == "true"
+# private repos need GH_ACTIVITY_TOKEN (a personal token). they're never named in posts:
+# the model only gets the kind of work, so client/company names stay out.
+# which option api modes post automatically: work, news, or meme (falls back to the first one)
+AUTO_OPTION = (os.getenv("AUTO_OPTION") or "work").lower()
+INCLUDE_PRIVATE_REPOS = (os.getenv("INCLUDE_PRIVATE_REPOS") or "true").lower() == "true"
+# repos to ignore completely, e.g. EXCLUDE_REPOS=me/client-app,acme/secret
+EXCLUDE_REPOS = {r.strip().lower() for r in (os.getenv("EXCLUDE_REPOS") or "").split(",") if r.strip()}
+# skip any repo whose name or description contains one of these, e.g. EXCLUDE_KEYWORDS=timber,ptm
+EXCLUDE_KEYWORDS = [k.strip().lower() for k in (os.getenv("EXCLUDE_KEYWORDS") or "").split(",") if k.strip()]
+
+
+def excluded(full_name: str, description: str = "") -> bool:
+    name = full_name.lower()
+    text = f"{name.split('/')[-1]} {description.lower()}"
+    return name in EXCLUDE_REPOS or any(k in text for k in EXCLUDE_KEYWORDS)
 AUTHOR_BIO = os.getenv("AUTHOR_BIO") or "a software developer who builds things in public"
 # Auto-posting is ON by default. A platform is skipped (with a warning) if its keys aren't set.
 AUTO_POST_X = (os.getenv("AUTO_POST_X") or "true").lower() == "true"
@@ -108,6 +121,8 @@ def repo_context(full_name: str, since: dt.datetime) -> dict | None:
         return None
     if info.get("private") and not INCLUDE_PRIVATE_REPOS:
         return None
+    if excluded(full_name, info.get("description") or ""):
+        return None
     try:
         commits = gh_get(
             f"https://api.github.com/repos/{full_name}/commits",
@@ -118,12 +133,16 @@ def repo_context(full_name: str, since: dt.datetime) -> dict | None:
         messages = [c["commit"]["message"].splitlines()[0] for c in commits]
     except requests.RequestException:
         messages = []
-    try:
-        readme = clean_readme(gh_text(f"https://api.github.com/repos/{full_name}/readme"))
-    except requests.RequestException:
-        readme = ""
+    private = bool(info.get("private"))
+    readme = ""
+    if not private:  # private readmes can hold client details; don't send them anywhere
+        try:
+            readme = clean_readme(gh_text(f"https://api.github.com/repos/{full_name}/readme"))
+        except requests.RequestException:
+            pass
     return {
         "name": full_name,
+        "private": private,
         "mine": info["owner"]["login"].lower() == GITHUB_USERNAME.lower(),
         "description": info.get("description") or "",
         "language": info.get("language") or "",
@@ -189,9 +208,19 @@ def fetch_github_activity() -> dict:
         elif t == "PublicEvent":
             lines.append(f"Open-sourced {repo}")
 
-    # the events feed can miss pushes, so also check my repos pushed in the window
+    # the events feed can miss pushes, so also check repos pushed in the window.
+    # with a personal token this includes private repos and org repos too.
     try:
-        for r in gh_get(f"https://api.github.com/users/{GITHUB_USERNAME}/repos", sort="pushed", per_page=15):
+        try:
+            listing = gh_get(
+                "https://api.github.com/user/repos",
+                sort="pushed",
+                per_page=30,
+                affiliation="owner,collaborator,organization_member",
+            )
+        except requests.RequestException:  # actions' built-in token can't use /user/repos
+            listing = gh_get(f"https://api.github.com/users/{GITHUB_USERNAME}/repos", sort="pushed", per_page=30)
+        for r in listing:
             pushed = dt.datetime.fromisoformat(r["pushed_at"].replace("Z", "+00:00"))
             if pushed >= since:
                 touched.append(r["full_name"])
@@ -199,17 +228,27 @@ def fetch_github_activity() -> dict:
         print(f"warning: could not list repos: {e}", file=sys.stderr)
 
     repos = []
-    for name in list(dict.fromkeys(touched))[:MAX_REPOS]:
+    for name in list(dict.fromkeys(touched)):
+        if len(repos) >= MAX_REPOS:
+            break
+        if excluded(name):
+            continue
         ctx = repo_context(name, since)
         if not ctx:
             continue
+        if ctx["private"] and not ctx["commits"]:
+            continue  # private + no commits from me = nothing to say
         if name == BOT_REPO and not ctx["commits"]:
             continue
         repos.append(ctx)
 
-    allowed = {r["name"] for r in repos}
-    lines = [l for l in dict.fromkeys(lines) if any(n in l for n in allowed)]  # drops hidden/private ones
-    return {"repos": repos, "events": lines, "starred": list(dict.fromkeys(starred))}
+    # keep event lines only for repos we kept, and never show private repo names
+    kept = []
+    for line in dict.fromkeys(lines):
+        repo = next((r for r in repos if r["name"] in line), None)
+        if repo:
+            kept.append(line.replace(repo["name"], "a private repo") if repo["private"] else line)
+    return {"repos": repos, "events": kept, "starred": list(dict.fromkeys(starred))}
 
 
 def has_real_work(activity: dict) -> bool:
@@ -217,11 +256,19 @@ def has_real_work(activity: dict) -> bool:
 
 
 def describe_repo(r: dict) -> str:
-    head = f"### {r['name']}" + (f" ({r['language']})" if r["language"] else "")
-    out = [head, f"what it is: {r['description'] or '(no description)'}"]
-    if r["topics"]:
-        out.append("topics: " + ", ".join(r["topics"]))
-    out.append(f"url: {r['url']}")
+    lang = f" ({r['language']})" if r["language"] else ""
+    if r["private"]:
+        out = [
+            f"### a PRIVATE project{lang}",
+            "rules for this one: never name the repo, the company, the client, or the product. "
+            "describe the kind of work only (e.g. 'migrating a legacy php app to laravel'). no link",
+            f"private description (for your understanding only, don't quote it): {r['description'] or '(none)'}",
+        ]
+    else:
+        out = [f"### {r['name']}{lang}", f"what it is: {r['description'] or '(no description)'}"]
+        if r["topics"]:
+            out.append("topics: " + ", ".join(r["topics"]))
+        out.append(f"url: {r['url']}")
     if r["commits"]:
         out.append(f"my commits in the last day ({len(r['commits'])}):\n- " + "\n- ".join(r["commits"][:15]))
     else:
@@ -272,14 +319,22 @@ Their voice guide and writing samples:
 {style}
 -----
 
+Every day you write THREE options, and the author picks which one to post:
+1. "work": about what they built. tell ONE story: what the thing is, what they did to it,
+   what's funny or hard about it. never walk through commits one by one, 20 commits =
+   "spent the night doing X". if the context has no work at all, set "work" to null
+2. "news": their hot take on ONE of today's news stories. pick the one a developer would
+   have the funniest or strongest opinion on, ideally one connected to what they build.
+   say what happened in a few words so people get it. if there's no news, set "news" to null
+3. "meme": a meme about their work or the news (whichever is funnier) with a short caption
+
 How to write a good post:
-- tell ONE story. what is the thing, what did i do to it, what's funny or hard about it.
-  never walk through commits one by one. 20 commits = "spent the day doing X", not a list
 - if people may not know the project, say what it is in one plain line early on
   (e.g. "it's a gpu i designed from scratch that draws triangles on a $10 fpga")
 - funny. dry, deadpan, self-aware, short punchlines, like the best tech twitter posts:
   understatement, absurd comparisons, roasting my own code or decisions. be bold, not cringe
 - no "thrilled to share", no inspirational lessons, no "here's what i learned"
+- the three options should feel different from each other, not the same joke three times
 
 Hard rules (facts):
 - first person. every fact about a project must come from the context given (description,
@@ -287,16 +342,25 @@ Hard rules (facts):
   jokes and exaggeration are fine as long as they're obviously jokes, not fake facts
 - repos listed under "my repos" are the author's OWN projects. talk about them as things they
   built ("i built", "i'm working on"), never as something they found or starred
-- only say they did something today if a commit, pr, or release shows it
+- PRIVATE projects: never name the repo, company, client, or product. only the kind of work
+- only say they did something if a commit, pr, or release shows it
 - don't mention repo names that aren't in the context
-- the x post must NOT contain any links or urls (links cost extra on x). linkedin may have one link
+- x posts must NOT contain any links or urls (links cost extra on x). linkedin may have one link
 
-Return ONLY valid JSON with exactly these keys:
+Lengths:
+- x: under 200 characters is ideal, MUST be under 260. 0-1 hashtags
+- linkedin: 400-900 characters. hook line first, short lines with blank lines between,
+  end with a thought, question, or punchline. 2-4 hashtags at the end
+- meme captions are shorter: x under 120 characters, linkedin 1-3 short lines + 1-2 hashtags
+
+Meme templates (pick one id, follow its line format, max ~8 words per line):
+{memes}
+
+Return ONLY valid JSON in exactly this shape:
 {{
-  "x": "x post. under 200 characters is ideal, MUST be under 260. one punchy thought or joke, no links, 0-1 hashtags",
-  "linkedin": "linkedin post, 400-900 characters. hook line, what the project is, the story of today, a funny line, end with a thought or question. short lines with blank lines between. 2-4 hashtags at the end",
-  "meme": {meme_spec},
-  "topic": "3-8 word summary of what this post is about"
+  "work": {{"x": "...", "linkedin": "...", "topic": "3-8 word summary"}} or null,
+  "news": {{"x": "...", "linkedin": "...", "topic": "3-8 word summary"}} or null,
+  "meme": {{"template": "<id>", "lines": ["...", "..."], "x": "...", "linkedin": "...", "topic": "3-8 word summary"}}
 }}"""
 
 MEME_TEMPLATES = {
@@ -328,13 +392,7 @@ MEME_TEMPLATES = {
     "millers": "You Guys Are Getting Paid?: 4 lines, setup between two characters, last = shocked question",
 }
 
-MEME_SPEC_ON = (
-    '{"template": "<one id from the list>", "lines": ["...", "..."]}. '
-    "make a meme about today's post. it has to be actually funny to developers and match the "
-    "template's format. lines are short (max ~8 words each), lowercase is fine. templates:\n"
-    + "\n".join(f"    {k}: {v}" for k, v in MEME_TEMPLATES.items())
-)
-MEME_SPEC_OFF = "null (no meme today)"
+MEME_LIST = "\n".join(f"  {k}: {v}" for k, v in MEME_TEMPLATES.items())
 
 
 def meme_url(meme: dict | None) -> str | None:
@@ -373,20 +431,19 @@ def strip_links(text: str) -> str:
 
 def build_user_prompt(activity: dict, news: list[str], history: list[dict]) -> str:
     parts = [f"Today is {dt.date.today():%A, %B %d, %Y}."]
-    real = has_real_work(activity)
     repos = activity["repos"]
-    if real:
+    if repos and has_real_work(activity):
         parts.append(
-            "Today's post is about what I actually worked on. Pick the most interesting thread "
-            "(usually the repo with the most meaningful commits) instead of listing everything."
+            "WORK: here's what I worked on in the last day. for the work option, pick the most "
+            "interesting thread (usually the project with the most meaningful commits)."
         )
     elif repos:
         parts.append(
-            "No new commits today. Write a post spotlighting one of my projects below: what it is, "
-            "why I built it, or what's hard/interesting about it, using only the facts given."
+            "WORK: no new commits today. for the work option, spotlight one of my projects below: "
+            "what it is, why it exists, or what's hard/interesting about it, using only the facts given."
         )
     else:
-        parts.append("I didn't ship anything on GitHub in the last day, so make today's post about the news.")
+        parts.append("WORK: nothing on GitHub in the last day, so set \"work\" to null.")
     if repos:
         parts.append(
             "My repos (these are MY projects, I built them) with real context:\n\n"
@@ -401,19 +458,15 @@ def build_user_prompt(activity: dict, news: list[str], history: list[dict]) -> s
             + "\n- ".join(activity["starred"][:10])
         )
     if news:
-        parts.append(
-            "Trending tech news (pick at most ONE that genuinely relates to my work or that a "
-            "developer would have a real opinion on; tie it back to what I'm building if possible):\n- "
-            + "\n- ".join(news)
-        )
+        parts.append("NEWS: today's top tech stories (from hacker news):\n- " + "\n- ".join(news))
+    else:
+        parts.append("NEWS: couldn't fetch news today, so set \"news\" to null.")
     if history:
         recent = "\n- ".join(h["topic"] for h in history[-10:])
         parts.append(
             "Recent post topics, ONLY so you don't repeat the same angle or opening. these are not "
             f"facts, and may be wrong:\n- {recent}"
         )
-    if not real and not repos and not news:
-        parts.append("Write a reflective post about a lesson from building software recently.")
     return "\n\n".join(parts)
 
 
@@ -465,18 +518,22 @@ def parse_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
-def call_groq(model: str, user_prompt: str, json_mode: bool = True, with_meme: bool = False) -> dict:
+OPTION_KEYS = ("work", "news", "meme")
+OPTION_LABELS = {"work": "my work", "news": "news take", "meme": "meme"}
+
+
+def valid_option(opt) -> bool:
+    return isinstance(opt, dict) and bool(opt.get("x")) and bool(opt.get("linkedin"))
+
+
+def call_groq(model: str, user_prompt: str, json_mode: bool = True) -> dict:
     body = {
         "model": model,
         "temperature": 0.9,
         "messages": [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT.format(
-                    bio=AUTHOR_BIO,
-                    style=load_style(),
-                    meme_spec=MEME_SPEC_ON if with_meme else MEME_SPEC_OFF,
-                ),
+                "content": SYSTEM_PROMPT.format(bio=AUTHOR_BIO, style=load_style(), memes=MEME_LIST),
             },
             {"role": "user", "content": user_prompt},
         ],
@@ -487,24 +544,25 @@ def call_groq(model: str, user_prompt: str, json_mode: bool = True, with_meme: b
         f"{GROQ_URL}/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         json=body,
-        timeout=120,
+        timeout=180,
     )
     if r.status_code != 200:
         raise RuntimeError(f"{r.status_code}: {r.text[:300]}")
     data = parse_json(r.json()["choices"][0]["message"]["content"])
-    if not (data.get("linkedin") and data.get("x")):
-        raise RuntimeError("model reply was missing the linkedin or x post")
+    if not any(valid_option(data.get(k)) for k in OPTION_KEYS):
+        raise RuntimeError("model reply had no usable options")
     return data
 
 
-def generate_posts(user_prompt: str, with_meme: bool = False) -> dict:
+def generate_options(user_prompt: str) -> dict:
+    """returns {"work": {...}, "news": {...}, "meme": {...}}, leaving out any that came back empty."""
     if not GROQ_API_KEY:
         sys.exit("GROQ_API_KEY is not set")
     data, errors = None, []
     for model in pick_models()[:5]:
         for json_mode in (True, False):  # some models don't support json mode
             try:
-                data = call_groq(model, user_prompt, json_mode, with_meme)
+                data = call_groq(model, user_prompt, json_mode)
                 print(f"model: {model}")
                 break
             except Exception as e:
@@ -513,12 +571,22 @@ def generate_posts(user_prompt: str, with_meme: bool = False) -> dict:
             break
     if not data:
         sys.exit("every groq model failed:\n" + "\n".join(errors))
-    if LOWERCASE:
-        data["linkedin"] = lowercase_voice(data["linkedin"])
-        data["x"] = lowercase_voice(data["x"])
-    data["x"] = fit_x(strip_links(data["x"]))
-    data["meme_url"] = meme_url(data.get("meme")) if with_meme else None
-    return data
+
+    options = {}
+    for key in OPTION_KEYS:
+        opt = data.get(key)
+        if not valid_option(opt):
+            continue
+        if LOWERCASE:
+            opt["x"] = lowercase_voice(opt["x"])
+            opt["linkedin"] = lowercase_voice(opt["linkedin"])
+        opt["x"] = fit_x(strip_links(opt["x"]))
+        if key == "meme":
+            opt["meme_url"] = meme_url(opt)
+            if not opt["meme_url"]:
+                continue  # a meme option without a valid meme is pointless
+        options[key] = opt
+    return options
 
 
 def fit_x(text: str) -> str:
@@ -560,45 +628,45 @@ def post_to_x(text: str, image_url: str | None = None) -> str:
     return f"https://x.com/i/web/status/{resp.data['id']}"
 
 
-def x_manual_section(text: str) -> str:
+def option_section(n: int, key: str, opt: dict, x: bool, linkedin: bool) -> str:
     from urllib.parse import quote
 
-    link = f"https://x.com/intent/post?text={quote(text)}"
-    return f"## x\n\n**[tap here to post on x]({link})**\n\n{text}"
+    out = [f"## option {n}: {OPTION_LABELS[key]}"]
+    if opt.get("meme_url"):
+        out.append(
+            f"![meme]({opt['meme_url']})\n\n"
+            "long-press (or right-click) to save the meme, then attach it when you post."
+        )
+    if x:
+        link = f"https://x.com/intent/post?text={quote(opt['x'])}"
+        out.append(f"**[tap here to post on x]({link})**\n\n{opt['x']}")
+    if linkedin:
+        link = f"https://www.linkedin.com/feed/?shareActive=true&text={quote(opt['linkedin'])}"
+        out.append(
+            f"**[tap here to post on linkedin]({link})**\n\n"
+            "if the app opens without the text filled in, copy it from here:\n\n"
+            f"```\n{opt['linkedin']}\n```"
+        )
+    return "\n\n".join(out)
 
 
-def linkedin_manual_section(text: str) -> str:
-    from urllib.parse import quote
-
-    link = f"https://www.linkedin.com/feed/?shareActive=true&text={quote(text)}"
-    return (
-        f"## linkedin\n\n**[tap here to post on linkedin]({link})**\n\n"
-        "if the app opens without the text filled in, copy it from here:\n\n"
-        f"```\n{text}\n```"
-    )
-
-
-def open_manual_issue(sections: list[str], platforms: list[str], image_url: str | None = None) -> str:
-    """free mode: one github issue a day with one-tap links for each platform."""
+def open_options_issue(options: dict, x: bool, linkedin: bool) -> str:
+    """one github issue a day with every option and one-tap links for each platform."""
     repo = os.environ["GITHUB_REPOSITORY"]  # set automatically in github actions
     token = os.environ["ISSUE_TOKEN"]
-    meme = (
-        f"## today's meme\n\n![meme]({image_url})\n\n"
-        "long-press (or right-click) to save it, then attach it when you post.\n\n---\n\n"
-        if image_url
-        else ""
-    )
+    sections = [option_section(i, k, o, x, linkedin) for i, (k, o) in enumerate(options.items(), 1)]
     body = (
-        "each link opens the app with the post filled in, you just hit post.\n\n"
-        + meme
+        "pick whichever you like (or post more than one). each link opens the app with the "
+        "post filled in, you just hit post.\n\n---\n\n"
         + "\n\n---\n\n".join(sections)
         + "\n\n_close this issue once posted_"
     )
+    labels = " / ".join(OPTION_LABELS[k] for k in options)
     r = requests.post(
         f"https://api.github.com/repos/{repo}/issues",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
         json={
-            "title": f"post on {' + '.join(platforms)}: {dt.date.today():%b %d}",
+            "title": f"today's posts ({labels}): {dt.date.today():%b %d}",
             "body": body,
             # assigning the repo owner makes github always send a notification
             # (email + mobile push), even if they aren't watching the repo
@@ -650,69 +718,58 @@ def post_to_linkedin(text: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print only; don't save or post")
-    ap.add_argument("--news", action="store_true", help="force a tech-news angle today")
-    ap.add_argument("--meme", action="store_true", help="force a meme today")
     args = ap.parse_args()
 
     activity = fetch_github_activity()
-    real = has_real_work(activity)
-    use_news = args.news or not activity["repos"] or random.random() < NEWS_PROBABILITY
-    news = fetch_tech_news() if use_news else []
+    news = fetch_tech_news()
     history = load_history()
-
     print(
-        f"repos: {[r['name'] for r in activity['repos']]} | real work: {real} | "
-        f"events: {len(activity['events'])} | news angle: {bool(news)}"
+        f"repos: {[('(private)' if r['private'] else r['name']) for r in activity['repos']]} | "
+        f"real work: {has_real_work(activity)} | events: {len(activity['events'])} | news: {len(news)}"
     )
-    with_meme = args.meme or random.random() < MEME_PROBABILITY
-    posts = generate_posts(build_user_prompt(activity, news, history), with_meme)
+    options = generate_options(build_user_prompt(activity, news, history))
 
     today = dt.date.today().isoformat()
-    md = (
-        f"# Posts for {today}\n\n_Topic: {posts.get('topic', '')}_\n\n"
-        f"## LinkedIn\n\n{posts['linkedin']}\n\n"
-        f"## X ({len(posts['x'])}/{X_LIMIT})\n\n{posts['x']}\n"
-    )
-    if posts.get("meme_url"):
-        md += f"\n## Meme\n\n![meme]({posts['meme_url']})\n"
+    md = f"# Posts for {today}\n"
+    for i, (key, opt) in enumerate(options.items(), 1):
+        md += f"\n## Option {i}: {OPTION_LABELS[key]} ({opt.get('topic', '')})\n\n"
+        if opt.get("meme_url"):
+            md += f"![meme]({opt['meme_url']})\n\n"
+        md += f"### X ({len(opt['x'])}/{X_LIMIT})\n\n{opt['x']}\n\n### LinkedIn\n\n{opt['linkedin']}\n"
     print("\n" + md)
     if args.dry_run:
         return
 
     POSTS_DIR.mkdir(exist_ok=True)
     (POSTS_DIR / f"{today}.md").write_text(md, encoding="utf-8")
-    history.append({"date": today, "topic": posts.get("topic", ""), "x": posts["x"]})
+    for opt in options.values():
+        history.append({"date": today, "topic": opt.get("topic", "")})
     save_history(history)
 
     failures = 0
-    manual_sections, manual_platforms = [], []
-
-    if AUTO_POST_X and X_MODE == "manual":
-        manual_sections.append(x_manual_section(posts["x"]))
-        manual_platforms.append("x")
-    elif AUTO_POST_X and X_MODE == "api" and has_keys(X_KEYS):
+    # api modes post one option automatically: AUTO_OPTION (default work), else the first one
+    pick = options.get(AUTO_OPTION) or next(iter(options.values()))
+    if AUTO_POST_X and X_MODE == "api" and has_keys(X_KEYS):
         try:
-            print("X:", post_to_x(posts["x"], posts.get("meme_url")))
+            print("X:", post_to_x(pick["x"], pick.get("meme_url")))
         except Exception as e:
             failures += 1
             print(f"X post failed: {e}", file=sys.stderr)
-
-    if AUTO_POST_LINKEDIN and LINKEDIN_MODE == "manual":
-        manual_sections.append(linkedin_manual_section(posts["linkedin"]))
-        manual_platforms.append("linkedin")
-    elif AUTO_POST_LINKEDIN and LINKEDIN_MODE == "api" and has_keys(LINKEDIN_KEYS):
+    if AUTO_POST_LINKEDIN and LINKEDIN_MODE == "api" and has_keys(LINKEDIN_KEYS):
         try:
-            print("LinkedIn:", post_to_linkedin(posts["linkedin"]))
+            print("LinkedIn:", post_to_linkedin(pick["linkedin"]))
         except Exception as e:
             failures += 1
             print(f"LinkedIn post failed: {e}", file=sys.stderr)
 
-    if manual_sections and has_keys(ISSUE_KEYS):
+    manual_x = AUTO_POST_X and X_MODE == "manual"
+    manual_li = AUTO_POST_LINKEDIN and LINKEDIN_MODE == "manual"
+    if (manual_x or manual_li) and has_keys(ISSUE_KEYS):
         try:
-            print("One-tap links:", open_manual_issue(manual_sections, manual_platforms, posts.get("meme_url")))
+            print("Options issue:", open_options_issue(options, manual_x, manual_li))
         except Exception as e:
             failures += 1
-            print(f"Could not open the one-tap issue: {e}", file=sys.stderr)
+            print(f"Could not open the options issue: {e}", file=sys.stderr)
 
     if failures:
         sys.exit(1)
