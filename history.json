@@ -18,5 +18,10 @@
     "date": "2026-11-15",
     "topic": "tiny gpu board routing progress",
     "x": "spent the day finally autorouting the tiny gpu board. i guess the router finally learned to love mazes #pcb"
+  },
+  {
+    "date": "2026-11-16",
+    "topic": "tiny gpu board build progress",
+    "x": "i finished the board build pipeline for tiny gpu, routed every net, and ran the drc. now the board looks clean enough to stare at. tiny gpu still not built, but the design is 100% kif‑safe. what's the smallest thing you built that still made you proud? #tinygpu"
   }
 ]
