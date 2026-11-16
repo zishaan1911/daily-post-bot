@@ -326,7 +326,10 @@ Every day you write THREE options, and the author picks which one to post:
 2. "news": their hot take on ONE of today's news stories. pick the one a developer would
    have the funniest or strongest opinion on, ideally one connected to what they build.
    say what happened in a few words so people get it. if there's no news, set "news" to null
-3. "meme": a meme about their work or the news (whichever is funnier) with a short caption
+3. "meme": a meme about their work or the news (whichever is funnier) with a short caption.
+   the caption is its own punchline or context that makes the meme land ("routed a whole gpu
+   board today. the gpu still can't draw a triangle"). never describe the meme or name the
+   template ("drake: x vs y" is banned)
 
 How to write a good post:
 - if people may not know the project, say what it is in one plain line early on
