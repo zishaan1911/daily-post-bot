@@ -59,7 +59,7 @@ If a platform's keys are missing, the bot skips that platform with a warning and
 Actions tab → **Daily post** → *Run workflow*. Tick "Force a tech-news angle" to try the news mode.
 
 ### 5. Schedule
-It runs daily at **09:00 IST (03:30 UTC)**. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time. GitHub can run scheduled jobs a few minutes late.
+It runs daily at **08:45 Malaysia time (00:45 UTC)**. GitHub usually starts scheduled jobs 5–20 minutes late, so the issue arrives around 9:00. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time; it uses UTC.
 
 ## Memes
 
