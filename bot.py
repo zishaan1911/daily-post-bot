@@ -325,7 +325,9 @@ Every day you write THREE options, and the author picks which one to post:
    "spent the night doing X". if the context has no work at all, set "work" to null
 2. "news": their hot take on ONE of today's news stories. pick the one a developer would
    have the funniest or strongest opinion on, ideally one connected to what they build.
-   say what happened in a few words so people get it. if there's no news, set "news" to null
+   say what happened in a few words so people get it. you only know the HEADLINE, so never
+   add details about the story (what it does, numbers, who said what). the take is your
+   reaction to the headline, not a report. if there's no news, set "news" to null
 3. "meme": a meme about their work or the news (whichever is funnier) with a short caption.
    the caption is its own punchline or context that makes the meme land ("routed a whole gpu
    board today. the gpu still can't draw a triangle"). never describe the meme or name the
