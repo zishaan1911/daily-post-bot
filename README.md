@@ -64,7 +64,7 @@ If a platform's keys are missing, the bot skips that platform with a warning and
 Actions tab → **Daily post** → *Run workflow*.
 
 ### 5. Schedule
-It runs daily at **08:45 Malaysia time (00:45 UTC)**. GitHub usually starts scheduled jobs 5–20 minutes late, so the issue arrives around 9:00. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time; it uses UTC.
+It runs daily at **08:45 Malaysia time (00:45 UTC)**, which usually arrives around 9:00 because GitHub starts scheduled jobs late. GitHub sometimes drops scheduled runs entirely, so there is a backup run at **10:15** that skips itself if the posts already exist. Change the `cron` line in `.github/workflows/daily-post.yml` for a different time; it uses UTC.
 
 ## Private repos
 

@@ -721,7 +721,12 @@ def post_to_linkedin(text: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="print only; don't save or post")
+    ap.add_argument("--once", action="store_true", help="skip if today's posts were already made")
     args = ap.parse_args()
+
+    if args.once and (POSTS_DIR / f"{dt.date.today().isoformat()}.md").exists():
+        print("today's posts already exist, skipping (backup schedule)")
+        return
 
     activity = fetch_github_activity()
     news = fetch_tech_news()

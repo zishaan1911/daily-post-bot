@@ -2,7 +2,9 @@ name: Daily post
 
 on:
   schedule:
-    - cron: "45 0 * * *"   # 00:45 UTC = 08:45 malaysia (UTC+8). github often starts scheduled jobs 5-20 min late, so it lands around 9
+    # times are UTC. malaysia is UTC+8.
+    - cron: "45 0 * * *"   # 08:45 malaysia, usually lands around 9 (github starts schedules late)
+    - cron: "15 2 * * *"   # 10:15 malaysia backup, in case github drops the first one. skips if today's posts exist
   workflow_dispatch:
 
 permissions:
@@ -20,6 +22,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Generate (and optionally publish) posts
         env:
+          TZ: Asia/Kuala_Lumpur   # so 'today' is your day
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GH_USERNAME: ${{ vars.GH_USERNAME || github.repository_owner }}
           GH_TOKEN: ${{ secrets.GH_ACTIVITY_TOKEN || secrets.GITHUB_TOKEN }}
@@ -41,7 +44,7 @@ jobs:
           AUTO_POST_LINKEDIN: ${{ vars.AUTO_POST_LINKEDIN || 'true' }}
           LINKEDIN_MODE: ${{ vars.LINKEDIN_MODE || 'api' }}   # 'manual' = free one-tap link via issue
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
-        run: python bot.py
+        run: python bot.py ${{ github.event_name == 'schedule' && '--once' || '' }}
       - name: Commit drafts
         if: always()
         run: |
