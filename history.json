@@ -47,5 +47,17 @@
   {
     "date": "2026-11-17",
     "topic": "flight rig disturbance handling"
+  },
+  {
+    "date": "2026-11-18",
+    "topic": "ark-1 hardware integration simulation"
+  },
+  {
+    "date": "2026-11-18",
+    "topic": "gpt‑6.2 release hot take"
+  },
+  {
+    "date": "2026-11-18",
+    "topic": "drake harness automation"
   }
 ]
