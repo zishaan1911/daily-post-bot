@@ -83,5 +83,17 @@
   {
     "date": "2026-11-20",
     "topic": "drake meme about live map upgrade"
+  },
+  {
+    "date": "2026-11-21",
+    "topic": "integrated health monitoring with predictive maintenance"
+  },
+  {
+    "date": "2026-11-21",
+    "topic": "valkey drops skiplist for b+tree"
+  },
+  {
+    "date": "2026-11-21",
+    "topic": "automated drone health grounding"
   }
 ]
