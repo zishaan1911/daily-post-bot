@@ -1,16 +1,6 @@
 [
   {
     "date": "2026-11-15",
-    "topic": "starred tiny-gpu rust emulator",
-    "x": "starred tiny-gpu on github – a tiny rust gpu emulator. could be handy for low‑level graphics experiments. anyone playing with minimalist graphics? #rust"
-  },
-  {
-    "date": "2026-11-15",
-    "topic": "nvidia gpu pricing and tiny-gpu",
-    "x": "nvidia's financing tricks keep gpu prices high again. makes me appreciate tiny-gpu even more—running on cheap hardware feels like a win. #gpu"
-  },
-  {
-    "date": "2026-11-15",
     "topic": "tiny gpu board routing progress",
     "x": "added board routing, drc pass, and cinematic renders to tiny‑gpu. maze router saved me hours. still not built though. anyone tried a similar fpga gpu? #fpga"
   },
@@ -119,5 +109,17 @@
   {
     "date": "2026-11-23",
     "topic": "portfolio bot vs manual html"
+  },
+  {
+    "date": "2026-11-24",
+    "topic": "vertical pd control added"
+  },
+  {
+    "date": "2026-11-24",
+    "topic": "nvidia brings back jensen"
+  },
+  {
+    "date": "2026-11-24",
+    "topic": "automated stats card update"
   }
 ]
