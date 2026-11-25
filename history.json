@@ -1,20 +1,5 @@
 [
   {
-    "date": "2026-11-15",
-    "topic": "tiny gpu board routing progress",
-    "x": "added board routing, drc pass, and cinematic renders to tiny‑gpu. maze router saved me hours. still not built though. anyone tried a similar fpga gpu? #fpga"
-  },
-  {
-    "date": "2026-11-15",
-    "topic": "tiny gpu board routing progress",
-    "x": "spent the day finally autorouting the tiny gpu board. i guess the router finally learned to love mazes #pcb"
-  },
-  {
-    "date": "2026-11-16",
-    "topic": "tiny gpu board build progress",
-    "x": "i finished the board build pipeline for tiny gpu, routed every net, and ran the drc. now the board looks clean enough to stare at. tiny gpu still not built, but the design is 100% kif‑safe. what's the smallest thing you built that still made you proud? #tinygpu"
-  },
-  {
     "date": "2026-11-16",
     "topic": "tiny gpu board fully routed"
   },
@@ -121,5 +106,17 @@
   {
     "date": "2026-11-24",
     "topic": "automated stats card update"
+  },
+  {
+    "date": "2026-11-25",
+    "topic": "ark sos mobile integration"
+  },
+  {
+    "date": "2026-11-25",
+    "topic": "ios safari fps workaround"
+  },
+  {
+    "date": "2026-11-25",
+    "topic": "drake ark sos tech choice"
   }
 ]
