@@ -1,17 +1,5 @@
 [
   {
-    "date": "2026-11-17",
-    "topic": "knife‑edge flight simulation updates"
-  },
-  {
-    "date": "2026-11-17",
-    "topic": "windows 11 telemetry on dev tools"
-  },
-  {
-    "date": "2026-11-17",
-    "topic": "flight rig disturbance handling"
-  },
-  {
     "date": "2026-11-18",
     "topic": "ark-1 hardware integration simulation"
   },
@@ -118,5 +106,17 @@
   {
     "date": "2026-11-26",
     "topic": "amphibious drone meme"
+  },
+  {
+    "date": "2026-11-27",
+    "topic": "scroll‑driven landing page added"
+  },
+  {
+    "date": "2026-11-27",
+    "topic": "ai makes self‑hosting fun"
+  },
+  {
+    "date": "2026-11-27",
+    "topic": "hero image scroll battle"
   }
 ]
