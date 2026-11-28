@@ -1,17 +1,5 @@
 [
   {
-    "date": "2026-11-18",
-    "topic": "ark-1 hardware integration simulation"
-  },
-  {
-    "date": "2026-11-18",
-    "topic": "gpt‑6.2 release hot take"
-  },
-  {
-    "date": "2026-11-18",
-    "topic": "drake harness automation"
-  },
-  {
     "date": "2026-11-19",
     "topic": "weather detour ops integration"
   },
@@ -118,5 +106,17 @@
   {
     "date": "2026-11-27",
     "topic": "hero image scroll battle"
+  },
+  {
+    "date": "2026-11-28",
+    "topic": "real‑time tokamak plasma simulator"
+  },
+  {
+    "date": "2026-11-28",
+    "topic": "linux kernel in wasm"
+  },
+  {
+    "date": "2026-11-28",
+    "topic": "drake meme about wasm tokamak"
   }
 ]
